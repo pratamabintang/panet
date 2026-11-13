@@ -2,6 +2,7 @@
 import os
 import shutil
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim
@@ -17,6 +18,7 @@ from dataloaders.landslide import landslide_fewshot
 from dataloaders.transforms import (RandomMirror, RandomFlip, RandomRotation,
                                     ColorJitter, Resize, ToTensorNormalize)
 from util.utils import set_seed, CLASS_LABELS
+from util.metric import Metric
 from config import ex
 
 
@@ -98,6 +100,22 @@ def main(_run, _config, _log):
     torch.cuda.set_device(device=_config['gpu_id'])
     torch.set_num_threads(1)
 
+    _log.info('###### Effective config ######')
+    try:
+        from collections.abc import Mapping
+
+        def _flatten(mapping, prefix=''):
+            for key, value in mapping.items():
+                if isinstance(value, Mapping):
+                    yield from _flatten(value, f'{prefix}{key}.')
+                else:
+                    yield f'{prefix}{key} = {value}'
+
+        source = _config.to_dict() if hasattr(_config, 'to_dict') else dict(_config)
+        for line in sorted(_flatten(source)):
+            _log.info(f'  {line}')
+    except Exception as exc:  # never let logging break training
+        _log.info(f'  (config dump failed: {exc})')
 
     _log.info('###### Create model ######')
     model = FewShotSeg(pretrained_path=_config['path']['init_path'], cfg=_config['model'])
@@ -160,6 +178,34 @@ def main(_run, _config, _log):
         collate_fn=collate_episodes
     )
 
+    # Optional periodic validation on the held-out split (landslide only)
+    val_loader = None
+    if data_name == 'landslide' and _config['val_interval'] > 0:
+        val_transforms = Compose([Resize(size=input_size)])
+        val_dataset = landslide_fewshot(
+            base_dir=_config['path']['landslide']['data_dir'],
+            split=_config['path']['landslide']['val_split'],
+            transforms=val_transforms,
+            to_tensor=ToTensorNormalize(),
+            labels=labels,
+            max_iters=_config['val_n_steps'],
+            n_ways=_config['task']['n_ways'],
+            n_shots=_config['task']['n_shots'],
+            n_queries=_config['task']['n_queries']
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=1,
+            shuffle=False,
+            num_workers=_config['num_workers'],
+            pin_memory=True,
+            drop_last=False,
+            collate_fn=collate_episodes
+        )
+        _log.info(f'###### Validation: {len(val_dataset)} episodes from split '
+                  f'"{_config["path"]["landslide"]["val_split"]}" every '
+                  f'{_config["val_interval"]} steps ######')
+
     _log.info('###### Set optimizer ######')
     optimizer = torch.optim.SGD(model.parameters(), **_config['optim'])
     scheduler = MultiStepLR(optimizer, milestones=_config['lr_milestones'], gamma=0.1)
@@ -171,6 +217,35 @@ def main(_run, _config, _log):
     # Gradient scaling is only needed for fp16 (bf16 has fp32's exponent range)
     scaler = _make_grad_scaler(use_amp and amp_dtype == torch.float16)
     _log.info(f'###### AMP: {amp_dtype if use_amp else "disabled"} ######')
+
+    def run_validation(step):
+        """Evaluate IoU(landslide) / FB-IoU on the validation split."""
+        model.eval()
+        metric = Metric(max_label=1, n_runs=1)
+        with torch.no_grad():
+            for val_batch in val_loader:
+                support_images = [[shot.cuda() for shot in way]
+                                  for way in val_batch['support_images']]
+                support_fg_mask = [[shot['fg_mask'].float().cuda() for shot in way]
+                                   for way in val_batch['support_mask']]
+                support_bg_mask = [[shot['bg_mask'].float().cuda() for shot in way]
+                                   for way in val_batch['support_mask']]
+                query_images = [q.cuda() for q in val_batch['query_images']]
+                query_labels = torch.cat(
+                    [q.long().cuda() for q in val_batch['query_labels']], dim=0)
+                with _make_autocast(use_amp, amp_dtype):
+                    query_pred, _ = model(support_images, support_fg_mask,
+                                          support_bg_mask, query_images)
+                metric.record(np.array(query_pred.argmax(dim=1)[0].cpu()),
+                              np.array(query_labels[0].cpu()),
+                              labels=list(labels), n_run=0)
+        iou_fg, _ = metric.get_mIoU(labels=sorted(labels), n_run=0)
+        _, fb_iou = metric.get_mIoU_binary(0)
+        model.train()
+        _log.info(f'step {step}: val IoU(landslide)={float(iou_fg):.4f} '
+                  f'FB-IoU={float(fb_iou):.4f}')
+        _run.log_scalar('val_iou_landslide', float(iou_fg), step)
+        _run.log_scalar('val_fb_iou', float(fb_iou), step)
 
     i_iter = 0
     log_loss = {'loss': 0, 'align_loss': 0}
@@ -207,6 +282,10 @@ def main(_run, _config, _log):
         scaler.update()
         scheduler.step()
 
+        # Periodic validation on the held-out split
+        if val_loader is not None and (i_iter + 1) % _config['val_interval'] == 0:
+            run_validation(i_iter + 1)
+
         # Log loss
         query_loss = query_loss.detach().data.cpu().numpy()
         align_loss = align_loss.detach().data.cpu().numpy() if align_loss != 0 else 0
@@ -228,5 +307,7 @@ def main(_run, _config, _log):
                        os.path.join(f'{_run.observers[0].dir}/snapshots', f'{i_iter + 1}.pth'))
 
     _log.info('###### Saving final model ######')
+    if val_loader is not None:
+        run_validation(i_iter + 1)
     torch.save(model.state_dict(),
                os.path.join(f'{_run.observers[0].dir}/snapshots', f'{i_iter + 1}.pth'))

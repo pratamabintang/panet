@@ -42,6 +42,9 @@ def cfg():
         print_interval = 100
         save_pred_every = 10000
         num_workers = 1
+        # Periodic validation (landslide): run IoU(landslide)/FB-IoU every N steps
+        val_interval = 1000     # 0 disables
+        val_n_steps = 200       # validation episodes per run
 
         model = {
             'align': True,
@@ -131,6 +134,7 @@ def cfg():
                 'data_split': 'train',},
         'landslide':{'data_dir': './datasets/landslide4sense/',
                      'data_split': 'train',
+                     'val_split': 'validation',
                      'size': (512, 512),},
     }
 
