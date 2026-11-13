@@ -41,10 +41,17 @@ def cfg():
         ignore_label = 255
         print_interval = 100
         save_pred_every = 10000
+        num_workers = 1
 
         model = {
             'align': True,
         }
+
+        # Automatic mixed precision. 'auto' picks bf16 on GPUs that support it
+        # (Ampere+), otherwise fp16; explicitly 'bf16'/'fp16' forces one, and
+        # False disables AMP. Falls back to fp16 when bf16 is requested but the
+        # GPU cannot do it.
+        amp = 'auto'
 
         aug = {
             'flip': True,
@@ -75,6 +82,7 @@ def cfg():
         n_runs = 5
         n_steps = 1000
         batch_size = 1
+        num_workers = 1
         scribble_dilation = 0
         bbox = False
         scribble = False

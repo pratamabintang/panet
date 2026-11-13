@@ -19,6 +19,49 @@ from util.utils import set_seed, CLASS_LABELS
 from config import ex
 
 
+try:  # torch >= 2.0 mixed-precision API
+    from torch.amp import autocast as _autocast, GradScaler as _GradScaler
+
+    def _make_autocast(enabled, dtype=torch.float16):
+        return _autocast(device_type='cuda', dtype=dtype, enabled=enabled)
+
+    def _make_grad_scaler(enabled):
+        return _GradScaler(device='cuda', enabled=enabled)
+except ImportError:  # older torch
+    from torch.cuda.amp import autocast as _autocast, GradScaler as _GradScaler
+
+    def _make_autocast(enabled, dtype=torch.float16):
+        return _autocast(enabled=enabled, dtype=dtype)
+
+    def _make_grad_scaler(enabled):
+        return _GradScaler(enabled=enabled)
+
+
+def resolve_amp(amp):
+    """
+    Resolve the AMP setting into an autocast dtype.
+
+    Args:
+        amp:
+            'auto'/True   -> bf16 if the GPU supports it, else fp16
+            'bf16'        -> bf16 if supported, else fp16
+            'fp16'        -> fp16
+            False/None/'' -> AMP disabled
+    Returns:
+        torch.dtype to autocast to, or None when AMP is disabled / no GPU.
+    """
+    if not amp or not torch.cuda.is_available():
+        return None
+    requested = str(amp).lower()
+    if requested in ('false', 'none', 'off', '0'):
+        return None
+    bf16_ok = torch.cuda.is_bf16_supported()
+    if requested == 'fp16':
+        return torch.float16
+    # 'auto', 'true', 'bf16' or anything else: prefer bf16 when available
+    return torch.bfloat16 if bf16_ok else torch.float16
+
+
 @ex.automain
 def main(_run, _config, _log):
     if _run.observers:
@@ -89,7 +132,7 @@ def main(_run, _config, _log):
         dataset,
         batch_size=_config['batch_size'],
         shuffle=True,
-        num_workers=1,
+        num_workers=_config['num_workers'],
         pin_memory=True,
         drop_last=True
     )
@@ -98,6 +141,13 @@ def main(_run, _config, _log):
     optimizer = torch.optim.SGD(model.parameters(), **_config['optim'])
     scheduler = MultiStepLR(optimizer, milestones=_config['lr_milestones'], gamma=0.1)
     criterion = nn.CrossEntropyLoss(ignore_index=_config['ignore_label'])
+
+    # Automatic mixed precision: bf16 when the GPU supports it, else fp16
+    amp_dtype = resolve_amp(_config['amp'])
+    use_amp = amp_dtype is not None
+    # Gradient scaling is only needed for fp16 (bf16 has fp32's exponent range)
+    scaler = _make_grad_scaler(use_amp and amp_dtype == torch.float16)
+    _log.info(f'###### AMP: {amp_dtype if use_amp else "disabled"} ######')
 
     i_iter = 0
     log_loss = {'loss': 0, 'align_loss': 0}
@@ -118,12 +168,14 @@ def main(_run, _config, _log):
 
         # Forward and Backward
         optimizer.zero_grad()
-        query_pred, align_loss = model(support_images, support_fg_mask, support_bg_mask,
-                                       query_images)
-        query_loss = criterion(query_pred, query_labels)
-        loss = query_loss + align_loss * _config['align_loss_scaler']
-        loss.backward()
-        optimizer.step()
+        with _make_autocast(use_amp, amp_dtype):
+            query_pred, align_loss = model(support_images, support_fg_mask, support_bg_mask,
+                                           query_images)
+            query_loss = criterion(query_pred, query_labels)
+            loss = query_loss + align_loss * _config['align_loss_scaler']
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         scheduler.step()
 
         # Log loss

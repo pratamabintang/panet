@@ -93,7 +93,7 @@ def main(_run, _config, _log):
             if _config['dataset'] == 'COCO':
                 coco_cls_ids = dataset.datasets[0].dataset.coco.getCatIds()
             testloader = DataLoader(dataset, batch_size=_config['batch_size'], shuffle=False,
-                                    num_workers=1, pin_memory=True, drop_last=False)
+                                    num_workers=_config['num_workers'], pin_memory=True, drop_last=False)
             _log.info(f"Total # of Data: {len(dataset)}")
 
 
