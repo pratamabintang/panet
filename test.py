@@ -145,8 +145,8 @@ def main(_run, _config, _log):
                 query_pred, _ = model(support_images, support_fg_mask, support_bg_mask,
                                       query_images)
 
-                metric.record(np.array(query_pred.argmax(dim=1)[0].cpu()),
-                              np.array(query_labels[0].cpu()),
+                metric.record(query_pred.argmax(dim=1)[0].cpu().numpy(),
+                              query_labels[0].cpu().numpy(),
                               labels=label_ids, n_run=run)
 
             classIoU, meanIoU = metric.get_mIoU(labels=sorted(labels), n_run=run)

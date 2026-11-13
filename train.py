@@ -236,16 +236,19 @@ def main(_run, _config, _log):
                 with _make_autocast(use_amp, amp_dtype):
                     query_pred, _ = model(support_images, support_fg_mask,
                                           support_bg_mask, query_images)
-                metric.record(np.array(query_pred.argmax(dim=1)[0].cpu()),
-                              np.array(query_labels[0].cpu()),
+                metric.record(query_pred.argmax(dim=1)[0].cpu().numpy(),
+                              query_labels[0].cpu().numpy(),
                               labels=list(labels), n_run=0)
         iou_fg, _ = metric.get_mIoU(labels=sorted(labels), n_run=0)
         _, fb_iou = metric.get_mIoU_binary(0)
+        # numpy>=2: float() needs a 0-d value, so flatten the per-class arrays
+        iou_fg = float(np.asarray(iou_fg).reshape(-1)[0])
+        fb_iou = float(np.asarray(fb_iou).reshape(-1)[0])
         model.train()
-        _log.info(f'step {step}: val IoU(landslide)={float(iou_fg):.4f} '
-                  f'FB-IoU={float(fb_iou):.4f}')
-        _run.log_scalar('val_iou_landslide', float(iou_fg), step)
-        _run.log_scalar('val_fb_iou', float(fb_iou), step)
+        _log.info(f'step {step}: val IoU(landslide)={iou_fg:.4f} '
+                  f'FB-IoU={fb_iou:.4f}')
+        _run.log_scalar('val_iou_landslide', iou_fg, step)
+        _run.log_scalar('val_fb_iou', fb_iou, step)
 
     i_iter = 0
     log_loss = {'loss': 0, 'align_loss': 0}
