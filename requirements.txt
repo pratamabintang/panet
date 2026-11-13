@@ -1,0 +1,29 @@
+# PANet few-shot segmentation — Python dependencies
+#
+# Install (GPU build of torch: pick the wheel matching your CUDA from
+# https://pytorch.org/get-started/locally/ first, then):
+#
+#   pip install -r requirements.txt
+#
+# The Landslide4Sense loader needs torch, torchvision, numpy, Pillow, scipy,
+# sacred, tqdm and h5py. Everything else is optional.
+
+# --- Core (required for train.py / test.py) ---------------------------------
+torch>=1.10
+torchvision>=0.11
+numpy>=1.21
+Pillow>=9.0
+scipy>=1.7
+sacred>=0.8
+tqdm>=4.62
+h5py>=3.0
+
+# --- COCO dataset only (not needed for Landslide4Sense / VOC) ----------------
+# Imported lazily; only required when dataset=COCO.
+# pycocotools>=2.0
+
+# --- Utility scripts only (util/scribbles.py, util/sbd_instance_process.py) --
+# Not imported by train.py / test.py.
+# networkx>=2.6
+# scikit-image>=0.18
+# scikit-learn>=0.24

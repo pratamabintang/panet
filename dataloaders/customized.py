@@ -9,7 +9,6 @@ import torch
 import numpy as np
 
 from .pascal import VOC
-from .coco import COCOSeg
 from .common import PairedDataset
 
 
@@ -238,6 +237,9 @@ def coco_fewshot(base_dir, split, transforms, to_tensor, labels, n_ways, n_shots
         n_queries:
             number of query images
     """
+    # Imported lazily so that pycocotools is only needed for the COCO dataset
+    from .coco import COCOSeg
+
     cocoseg = COCOSeg(base_dir, split, transforms, to_tensor)
     cocoseg.add_attrib('basic', attrib_basic, {})
 
