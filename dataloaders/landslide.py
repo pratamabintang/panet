@@ -15,6 +15,7 @@ Labels are binary: 0 = non-landslide, 1 = landslide.
 
 import os
 import random
+import time
 
 import h5py
 import numpy as np
@@ -24,6 +25,11 @@ import torch
 from .common import BaseDataset
 from .common import PairedDataset
 from .customized import attrib_basic, fewShot
+
+try:
+    from tqdm import tqdm
+except ImportError:  # tqdm is optional, only used for scan progress
+    tqdm = None
 
 
 class Landslide(BaseDataset):
@@ -53,9 +59,25 @@ class Landslide(BaseDataset):
         self.transforms = transforms
         self.to_tensor = to_tensor
 
+        if not os.path.isdir(self._image_dir):
+            raise FileNotFoundError(
+                f'[Landslide] image directory not found: {self._image_dir}. '
+                f'Check path.landslide.data_dir and the "{split}" split name.')
         names = [f for f in os.listdir(self._image_dir) if f.endswith('.h5')]
         self.ids = sorted((os.path.splitext(f)[0] for f in names),
                           key=lambda x: int(x.split('_')[-1]))
+
+        # Lightweight progress logging so it is clear the loader actually runs
+        print(f'[Landslide] split={split!r}  base_dir={self._base_dir}', flush=True)
+        print(f'[Landslide]   images: {self._image_dir}  ({len(self.ids)} .h5 files)',
+              flush=True)
+        if os.path.isdir(self._label_dir):
+            n_masks = len([f for f in os.listdir(self._label_dir) if f.endswith('.h5')])
+            print(f'[Landslide]   masks : {self._label_dir}  ({n_masks} .h5 files)',
+                  flush=True)
+        else:
+            print(f'[Landslide]   masks : {self._label_dir}  (MISSING -> labels are zeros)',
+                  flush=True)
 
     def __len__(self):
         return len(self.ids)
@@ -104,11 +126,24 @@ class Landslide(BaseDataset):
             with open(cache, 'r') as f:
                 cached = [line.strip() for line in f if line.strip()]
             known = set(self.ids)
-            return [id_ for id_ in cached if id_ in known]
+            ids = [id_ for id_ in cached if id_ in known]
+            print(f'[Landslide] class{class_id} split={self.split}: {len(ids)} patches '
+                  f'loaded from cache {cache}', flush=True)
+            return ids
 
-        ids = [id_ for id_ in self.ids if self.has_foreground(id_)]
+        t0 = time.time()
+        print(f'[Landslide] scanning masks for class{class_id} in split '
+              f'"{self.split}" ({len(self.ids)} patches)...', flush=True)
+        source = self.ids
+        if tqdm is not None:
+            source = tqdm(self.ids, desc=f'[Landslide] scan class{class_id} ({self.split})',
+                          leave=False)
+        ids = [id_ for id_ in source if self.has_foreground(id_)]
         with open(cache, 'w') as f:
             f.write('\n'.join(ids))
+        print(f'[Landslide] class{class_id} split={self.split}: {len(ids)}/{len(self.ids)} '
+              f'patches contain the class (scanned in {time.time() - t0:.1f}s) '
+              f'-> cache {cache}', flush=True)
         return ids
 
     def __getitem__(self, idx):
@@ -185,6 +220,9 @@ def landslide_fewshot(base_dir, split, transforms, to_tensor, labels, n_ways, n_
             raise RuntimeError(
                 f'No patch with landslide (class {cls_id}) found in split '
                 f'"{split}" of {base_dir}. Few-shot episodes cannot be built.')
+    print(f'[Landslide] few-shot: labels={sorted(labels)} '
+          f'patches_per_class={ {c: len(i) for c, i in zip(labels, sub_ids)} } '
+          f'n_ways={n_ways} n_shots={n_shots} n_queries={n_queries}', flush=True)
     subsets = landslide.subsets(
         sub_ids, [{'basic': {'class_id': cls_id}} for cls_id in labels])
 

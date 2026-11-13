@@ -8,6 +8,7 @@ import torch
 import torch.optim
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.utils.data.dataloader import default_collate
 import torch.backends.cudnn as cudnn
 from torchvision.transforms import Compose
 
@@ -19,6 +20,16 @@ from dataloaders.transforms import Resize, DilateScribble
 from util.metric import Metric
 from util.utils import set_seed, CLASS_LABELS, get_bbox
 from config import ex
+
+
+def collate_episodes(batch):
+    """Collate episode dicts; pass through variable-length list fields."""
+    passthrough = ('query_cls_idx', 'query_masks')
+    out = {}
+    for key in batch[0].keys():
+        values = [sample[key] for sample in batch]
+        out[key] = values if key in passthrough else default_collate(values)
+    return out
 
 
 @ex.automain
@@ -93,7 +104,8 @@ def main(_run, _config, _log):
             if _config['dataset'] == 'COCO':
                 coco_cls_ids = dataset.datasets[0].dataset.coco.getCatIds()
             testloader = DataLoader(dataset, batch_size=_config['batch_size'], shuffle=False,
-                                    num_workers=_config['num_workers'], pin_memory=True, drop_last=False)
+                                    num_workers=_config['num_workers'], pin_memory=True, drop_last=False,
+                                    collate_fn=collate_episodes)
             _log.info(f"Total # of Data: {len(dataset)}")
 
 

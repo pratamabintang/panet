@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.optim
 from torch.utils.data import DataLoader
+from torch.utils.data.dataloader import default_collate
 from torch.optim.lr_scheduler import MultiStepLR
 import torch.backends.cudnn as cudnn
 from torchvision.transforms import Compose
@@ -60,6 +61,24 @@ def resolve_amp(amp):
         return torch.float16
     # 'auto', 'true', 'bf16' or anything else: prefer bf16 when available
     return torch.bfloat16 if bf16_ok else torch.float16
+
+
+def collate_episodes(batch):
+    """
+    Collate a batch of few-shot episode dicts.
+
+    ``fewShot`` returns some per-episode fields whose length varies between
+    episodes (e.g. ``query_cls_idx`` and ``query_masks`` depend on which classes
+    appear in each query). ``default_collate`` cannot stack those, so they are
+    passed through as a plain list. All tensor / fixed-length fields are
+    collated normally.
+    """
+    passthrough = ('query_cls_idx', 'query_masks')
+    out = {}
+    for key in batch[0].keys():
+        values = [sample[key] for sample in batch]
+        out[key] = values if key in passthrough else default_collate(values)
+    return out
 
 
 @ex.automain
@@ -128,13 +147,17 @@ def main(_run, _config, _log):
         n_shots=_config['task']['n_shots'],
         n_queries=_config['task']['n_queries']
     )
+    _log.info(f'###### Dataset ready: {len(dataset)} episodes '
+              f'(split={_config["path"][data_name]["data_split"]}, '
+              f'labels={sorted(labels)}) ######')
     trainloader = DataLoader(
         dataset,
         batch_size=_config['batch_size'],
         shuffle=True,
         num_workers=_config['num_workers'],
         pin_memory=True,
-        drop_last=True
+        drop_last=True,
+        collate_fn=collate_episodes
     )
 
     _log.info('###### Set optimizer ######')
@@ -165,6 +188,12 @@ def main(_run, _config, _log):
                         for query_image in sample_batched['query_images']]
         query_labels = torch.cat(
             [query_label.long().cuda() for query_label in sample_batched['query_labels']], dim=0)
+
+        if i_iter == 0:
+            _log.info(
+                f'###### First episode: support={tuple(support_images[0][0].shape)} '
+                f'query={tuple(query_images[0].shape)} '
+                f'qlabels={tuple(query_labels.shape)} ######')
 
         # Forward and Backward
         optimizer.zero_grad()
