@@ -12,7 +12,8 @@ import torch.backends.cudnn as cudnn
 from torchvision.transforms import Compose
 
 from models.fewshot import FewShotSeg
-from dataloaders.customized import voc_fewshot, coco_fewshot, landslide_fewshot
+from dataloaders.customized import voc_fewshot, coco_fewshot
+from dataloaders.landslide import landslide_fewshot
 from dataloaders.transforms import ToTensorNormalize
 from dataloaders.transforms import Resize, DilateScribble
 from util.metric import Metric
