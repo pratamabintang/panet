@@ -11,8 +11,9 @@ import torch.backends.cudnn as cudnn
 from torchvision.transforms import Compose
 
 from models.fewshot import FewShotSeg
-from dataloaders.customized import voc_fewshot, coco_fewshot
-from dataloaders.transforms import RandomMirror, Resize, ToTensorNormalize
+from dataloaders.customized import voc_fewshot, coco_fewshot, landslide_fewshot
+from dataloaders.transforms import (RandomMirror, RandomFlip, RandomRotation,
+                                    ColorJitter, Resize, ToTensorNormalize)
 from util.utils import set_seed, CLASS_LABELS
 from config import ex
 
@@ -47,11 +48,31 @@ def main(_run, _config, _log):
         make_data = voc_fewshot
     elif data_name == 'COCO':
         make_data = coco_fewshot
+    elif data_name == 'landslide':
+        make_data = landslide_fewshot
     else:
         raise ValueError('Wrong config for dataset!')
     labels = CLASS_LABELS[data_name][_config['label_sets']]
-    transforms = Compose([Resize(size=_config['input_size']),
-                          RandomMirror()])
+    # Landslide patches (128x128) are upsampled to a per-dataset size; the
+    # Resize transform uses bilinear for the multispectral image and nearest
+    # neighbour for the label.
+    if data_name == 'landslide':
+        input_size = _config['path']['landslide']['size']
+    else:
+        input_size = _config['input_size']
+    transforms = [Resize(size=input_size)]
+    if data_name == 'landslide':
+        # Random flip + rotation (geometric) and colour perturbation on the
+        # multispectral image only (see config['aug']).
+        aug = _config['aug']
+        if aug['flip']:
+            transforms.append(RandomFlip())
+        if aug['rotation'] > 0:
+            transforms.append(RandomRotation(degrees=aug['rotation']))
+        transforms.append(ColorJitter(**aug['color_jitter']))
+    else:
+        transforms.append(RandomMirror())
+    transforms = Compose(transforms)
     dataset = make_data(
         base_dir=_config['path'][data_name]['data_dir'],
         split=_config['path'][data_name]['data_split'],

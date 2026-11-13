@@ -46,6 +46,17 @@ def cfg():
             'align': True,
         }
 
+        aug = {
+            'flip': True,
+            'rotation': 180,
+            'color_jitter': {
+                'brightness': 0.2,
+                'contrast': 0.3,
+                'saturation': 0.2,
+                'hue': 0.0,
+            },
+        }
+
         task = {
             'n_ways': 1,
             'n_shots': 1,
@@ -73,6 +84,8 @@ def cfg():
             dataset = 'VOC'
         elif 'COCO' in snapshot:
             dataset = 'COCO'
+        elif 'landslide' in snapshot:
+            dataset = 'landslide'
         else:
             raise ValueError('Wrong snapshot name !')
 
@@ -108,6 +121,9 @@ def cfg():
                'data_split': 'trainaug',},
         'COCO':{'data_dir': '../../data/COCO/',
                 'data_split': 'train',},
+        'landslide':{'data_dir': './datasets/landslide4sense/',
+                     'data_split': 'train',
+                     'size': (512, 512),},
     }
 
 @ex.config_hook

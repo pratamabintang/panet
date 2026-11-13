@@ -26,7 +26,11 @@ CLASS_LABELS = {
         1: set(range(1, 81)) - set(range(21, 41)),
         2: set(range(1, 81)) - set(range(41, 61)),
         3: set(range(1, 81)) - set(range(61, 81)),
-    }
+    },
+    'landslide': {
+        'all': set([1,]),
+        0: set([1,]),
+    },
 }
 
 def get_bbox(fg_mask, inst_mask):

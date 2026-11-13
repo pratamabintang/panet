@@ -12,7 +12,7 @@ import torch.backends.cudnn as cudnn
 from torchvision.transforms import Compose
 
 from models.fewshot import FewShotSeg
-from dataloaders.customized import voc_fewshot, coco_fewshot
+from dataloaders.customized import voc_fewshot, coco_fewshot, landslide_fewshot
 from dataloaders.transforms import ToTensorNormalize
 from dataloaders.transforms import Resize, DilateScribble
 from util.metric import Metric
@@ -51,10 +51,20 @@ def main(_run, _config, _log):
     elif data_name == 'COCO':
         make_data = coco_fewshot
         max_label = 80
+    elif data_name == 'landslide':
+        make_data = landslide_fewshot
+        max_label = 1
     else:
         raise ValueError('Wrong config for dataset!')
-    labels = CLASS_LABELS[data_name]['all'] - CLASS_LABELS[data_name][_config['label_sets']]
-    transforms = [Resize(size=_config['input_size'])]
+    if data_name == 'landslide':
+        labels = CLASS_LABELS[data_name]['all']
+    else:
+        labels = CLASS_LABELS[data_name]['all'] - CLASS_LABELS[data_name][_config['label_sets']]
+    if data_name == 'landslide':
+        input_size = _config['path']['landslide']['size']
+    else:
+        input_size = _config['input_size']
+    transforms = [Resize(size=input_size)]
     if _config['scribble_dilation'] > 0:
         transforms.append(DilateScribble(size=_config['scribble_dilation']))
     transforms = Compose(transforms)
